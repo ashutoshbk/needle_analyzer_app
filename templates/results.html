@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Results – {{ folder_name }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+<div class="container">
+
+    <header>
+        <h1>🔬 Surgery Rubric Score Analyzer</h1>
+        <p>Analysis Results</p>
+    </header>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            <div class="messages">
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">{{ message }}</div>
+                {% endfor %}
+            </div>
+        {% endif %}
+    {% endwith %}
+
+    <div class="back-link">
+        <a href="{{ url_for('index') }}" class="btn btn-secondary">← Back to Home</a>
+    </div>
+
+    <div class="results-detail">
+
+        <!-- ════════════════════════════════════════════
+             RAW REPORT  (collapsed by default)
+        ════════════════════════════════════════════ -->
+        <div class="results-card">
+            <div class="results-card-header collapsible-trigger" onclick="toggleSection('raw-report')">
+                <div class="card-header-left">
+                    <h2>📄 Raw Analysis Report</h2>
+                    <span class="collapse-hint" id="hint-raw-report">Click to expand</span>
+                </div>
+                <div class="header-actions" onclick="event.stopPropagation()">
+                    <a href="{{ url_for('download_txt', folder_name=folder_name) }}" class="btn btn-secondary btn-small">⬇ TXT</a>
+                    <a href="{{ url_for('download_results', folder_name=folder_name) }}" class="btn btn-info btn-small">⬇ All</a>
+                    <span class="collapse-arrow" id="arrow-raw-report">▶</span>
+                </div>
+            </div>
+            <div class="collapsible-body" id="raw-report" style="display:none;">
+                <div class="results-content">
+                    {% if txt_content %}
+                        <pre class="txt-report">{{ txt_content }}</pre>
+                    {% else %}
+                        <p class="empty-state">No analysis results found.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- ════════════════════════════════════════════
+             PER-SUTURE SECTIONS
+             Each suture = one big collapsible card with:
+               1. Needle Holding + Needle Insertion
+               2. Hand Rotation (ref image left + graph right)
+               3. Knot Tying Hand Movement video
+        ════════════════════════════════════════════ -->
+        {% if suture_data and suture_data|length > 0 %}
+        {% for suture in suture_data %}
+
+        {# ── look up matching rotation graph for this suture ── #}
+        {% set rot_graph = suture.rotation_graph if suture.rotation_graph else
+           (rotation_graphs[suture.suture_num - 1] if rotation_graphs|length >= suture.suture_num else None) %}
+
+        {# ── look up matching expert video for this suture ── #}
+        {% set exp_video = None %}
+        {% set exp_loops = None %}
+        {% if expert_suture_data %}
+            {% for esd in expert_suture_data %}
+                {% if esd.suture_num == suture.suture_num %}
+                    {% set exp_video = esd.video_file %}
+                    {% set exp_loops = esd %}
+                {% endif %}
+            {% endfor %}
+        {% endif %}
+        {# fallback: match by index from video list #}
+        {% if not exp_video and expert_movement_videos|length >= suture.suture_num %}
+            {% set exp_video = expert_movement_videos[suture.suture_num - 1] %}
+        {% endif %}
+
+        <div class="results-card suture-master-card">
+
+            <!-- ── Suture header (collapsible) ── -->
+            <div class="suture-master-header collapsible-trigger"
+                 onclick="toggleSection('sm-{{ suture.suture_num }}')">
+                <div class="suture-master-title">
+                    <span class="suture-number-badge">{{ suture.suture_num }}</span>
+                    <div>
+                        <h2>Suture {{ suture.suture_num }}</h2>
+                        <span class="suture-time">{{ suture.time_range }}&nbsp;&nbsp;·&nbsp;&nbsp;{{ suture.duration }}</span>
+                    </div>
+                </div>
+                <span class="collapse-arrow light" id="arrow-sm-{{ suture.suture_num }}">▼</span>
+            </div>
+
+            <div class="collapsible-body open" id="sm-{{ suture.suture_num }}">
+
+                <!-- ══════════════════════════════════
+                     PART A — Needle Holding + Insertion
+                ══════════════════════════════════ -->
+                <div class="suture-part">
+                    <div class="suture-part-label">🔬 Needle Analysis</div>
+                    <div class="suture-card-body">
+
+                        <!-- Needle Holding -->
+                        <div class="suture-analysis-item">
+                            <h4>Needle Holding</h4>
+                            {% if suture.holding_detected and suture.holding_image %}
+                                <div class="analysis-image-container"
+                                     onclick="openImageModal(
+                                         '{{ url_for('serve_suture_image', folder_name=folder_name, filename=suture.holding_image) }}',
+                                         'Suture {{ suture.suture_num }} – Holding {{ suture.holding_pct }}%')">
+                                    <img src="{{ url_for('serve_suture_image', folder_name=folder_name, filename=suture.holding_image) }}"
+                                         alt="Needle Holding" class="analysis-image">
+                                </div>
+                            {% elif suture.holding_detected %}
+                                <div class="not-detected"><span>🖼 Image not found</span></div>
+                            {% else %}
+                                <div class="not-detected"><span>❌ Not Detected</span></div>
+                            {% endif %}
+                            <div class="analysis-details">
+                                {% if suture.holding_pct %}
+                                <div class="detail-row">
+                                    <span class="detail-label">Holding %</span>
+                                    <span class="detail-value highlight-green">{{ suture.holding_pct }}%</span>
+                                </div>
+                                {% endif %}
+                                {% if suture.holding_frame %}
+                                <div class="detail-row">
+                                    <span class="detail-label">33% Frame</span>
+                                    <span class="detail-value">Frame {{ suture.holding_frame }}</span>
+                                </div>
+                                {% endif %}
+                                {% if suture.holding_image %}
+                                <div class="detail-row">
+                                    <span class="detail-label">Image</span>
+                                    <span class="detail-value filename">{{ suture.holding_image }}</span>
+                                </div>
+                                {% endif %}
+                                {% if not suture.holding_detected %}
+                                <p class="detail-na">No holding data available</p>
+                                {% endif %}
+                            </div>
+                        </div>
+
+                        <!-- Needle Insertion -->
+                        <div class="suture-analysis-item">
+                            <h4>Needle Insertion</h4>
+                            {% if suture.insertion_detected and suture.insertion_image %}
+                                <div class="analysis-image-container"
+                                     onclick="openImageModal(
+                                         '{{ url_for('serve_suture_image', folder_name=folder_name, filename=suture.insertion_image) }}',
+                                         'Suture {{ suture.suture_num }} – Angle {{ suture.insertion_angle }}°')">
+                                    <img src="{{ url_for('serve_suture_image', folder_name=folder_name, filename=suture.insertion_image) }}"
+                                         alt="Needle Insertion" class="analysis-image">
+                                </div>
+                            {% elif suture.insertion_detected %}
+                                <div class="not-detected"><span>🖼 Image not found</span></div>
+                            {% else %}
+                                <div class="not-detected"><span>❌ Not Detected</span></div>
+                            {% endif %}
+                            <div class="analysis-details">
+                                {% if suture.insertion_angle %}
+                                <div class="detail-row">
+                                    <span class="detail-label">Angle</span>
+                                    <span class="detail-value highlight-amber">{{ suture.insertion_angle }}°</span>
+                                </div>
+                                {% endif %}
+                                {% if suture.insertion_frame %}
+                                <div class="detail-row">
+                                    <span class="detail-label">Angle Frame</span>
+                                    <span class="detail-value">Frame {{ suture.insertion_frame }}</span>
+                                </div>
+                                {% endif %}
+                                {% if suture.insertion_image %}
+                                <div class="detail-row">
+                                    <span class="detail-label">Image</span>
+                                    <span class="detail-value filename">{{ suture.insertion_image }}</span>
+                                </div>
+                                {% endif %}
+                                {% if not suture.insertion_detected %}
+                                <p class="detail-na">No insertion data available</p>
+                                {% endif %}
+                            </div>
+                        </div>
+
+                    </div>
+                </div><!-- /part A -->
+
+                <!-- ══════════════════════════════════
+                     PART B — Needle Entry & Exit
+                     Always shown; "Not Detected" when no image.
+                ══════════════════════════════════ -->
+                <div class="suture-part suture-part-bordered">
+                    <div class="suture-part-label">📍 Needle Entry &amp; Exit Points</div>
+                    <div class="suture-card-body">
+
+                        <div class="suture-analysis-item" style="flex: 0 0 100%; max-width: 100%;">
+                            {% if suture.entry_exit_image %}
+                                <div class="analysis-image-container"
+                                     onclick="openImageModal(
+                                         '{{ url_for('serve_entry_exit_image', folder_name=folder_name, filename=suture.entry_exit_image) }}',
+                                         'Suture {{ suture.suture_num }} – Entry (🔴) &amp; Exit (🔵)')">
+                                    <img src="{{ url_for('serve_entry_exit_image', folder_name=folder_name, filename=suture.entry_exit_image) }}"
+                                         alt="Needle Entry/Exit Suture {{ suture.suture_num }}"
+                                         class="analysis-image">
+                                </div>
+                                <p style="font-size:0.78rem; color:#888; margin:4px 0 0 0; text-align:center;">
+                                    🔴 Red = Entry point &nbsp;|&nbsp; 🔵 Blue = Exit point &nbsp;·&nbsp; Click to enlarge
+                                </p>
+                            {% else %}
+                                <div class="not-detected"><span>❌ Not Detected</span></div>
+                            {% endif %}
+                            <div class="analysis-details" style="margin-top: 10px;">
+                                {% if suture.entry_exit_angle %}
+                                <div class="detail-row">
+                                    <span class="detail-label">Entry Angle</span>
+                                    <span class="detail-value highlight-amber">{{ suture.entry_exit_angle }}°</span>
+                                </div>
+                                {% endif %}
+                                {% if suture.entry_exit_image %}
+                                <div class="detail-row">
+                                    <span class="detail-label">Image</span>
+                                    <span class="detail-value filename">{{ suture.entry_exit_image }}</span>
+                                </div>
+                                {% endif %}
+                                {% if not suture.entry_exit_detected %}
+                                <p class="detail-na">No entry/exit data available for this suture</p>
+                                {% endif %}
+                            </div>
+                        </div>
+
+                    </div>
+                </div><!-- /part B: entry/exit -->
+
+                <!-- ══════════════════════════════════
+                     PART C — Hand Rotation
+                ══════════════════════════════════ -->
+                {% if rot_graph %}
+                <div class="suture-part suture-part-bordered">
+                    <div class="suture-part-label">🔄 Hand Rotation Analysis</div>
+
+                    <div class="rotation-part-layout">
+
+                        <!-- LEFT: reference image (same for all sutures) -->
+                        <div class="rotation-ref-col">
+                            <p class="ref-col-title">Reference Guide</p>
+                            <div class="rotation-reference-card"
+                                 onclick="openImageModal(this.querySelector('img').src, 'Hand Rotation Reference Guide')">
+                                <img src="{{ url_for('static', filename='images/rotation_reference.png') }}"
+                                     alt="Hand Rotation Reference"
+                                     class="rotation-reference-image"
+                                     onerror="this.src='{{ url_for('static', filename='images/rotation_reference.jpg') }}'">
+                                <p class="reference-caption">Click to enlarge</p>
+                            </div>
+                        </div>
+
+                        <!-- RIGHT: this suture's graph + stats -->
+                        <div class="rotation-graph-col">
+                            <!-- stats row -->
+                            {% if suture.rotation_pronated or suture.rotation_supinated %}
+                            <div class="rotation-inline-stats">
+                                {% if suture.rotation_pronated %}
+                                <div class="rot-stat">
+                                    <span class="rot-label">Pronated</span>
+                                    <span class="rot-value red">{{ suture.rotation_pronated }}%</span>
+                                </div>
+                                {% endif %}
+                                {% if suture.rotation_supinated %}
+                                <div class="rot-stat">
+                                    <span class="rot-label">Supinated</span>
+                                    <span class="rot-value blue">{{ suture.rotation_supinated }}%</span>
+                                </div>
+                                {% endif %}
+                                {% if suture.rotation_angle_min and suture.rotation_angle_max %}
+                                <div class="rot-stat wide">
+                                    <span class="rot-label">Angle Range</span>
+                                    <span class="rot-value">{{ suture.rotation_angle_min }}° – {{ suture.rotation_angle_max }}°</span>
+                                </div>
+                                {% endif %}
+                            </div>
+                            {% endif %}
+                            <!-- graph -->
+                            <div class="rotation-graph-card"
+                                 onclick="openImageModal(
+                                     '{{ url_for('serve_rotation_graph', folder_name=folder_name, filename=rot_graph) }}',
+                                     'Hand Rotation – Suture {{ suture.suture_num }}')">
+                                <img src="{{ url_for('serve_rotation_graph', folder_name=folder_name, filename=rot_graph) }}"
+                                     alt="Hand Rotation Suture {{ suture.suture_num }}"
+                                     class="rotation-graph">
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+                {% endif %}<!-- /part C: hand rotation -->
+
+                <!-- ══════════════════════════════════
+                     PART D — Knot Tying Hand Movement
+                ══════════════════════════════════ -->
+                {% if exp_video %}
+                <div class="suture-part suture-part-bordered">
+                    <div class="suture-part-label">🪢 Knot Tying Hand Movement</div>
+
+                    {% if exp_loops %}
+                    <div class="expert-loop-badges" style="padding: 0 20px 14px;">
+                        <span class="loop-badge left">👈 Left Loops: {{ exp_loops.left_loops }}</span>
+                        <span class="loop-badge right">👉 Right Loops: {{ exp_loops.right_loops }}</span>
+                        <span class="loop-badge total">🔁 Total Loops: {{ exp_loops.total_loops }}</span>
+                    </div>
+                    {% endif %}
+
+                    <div class="expert-video-body">
+                        <div class="video-wrapper">
+                            <video controls preload="metadata">
+                                <source src="{{ url_for('serve_expert_movement_video', folder_name=folder_name, filename=exp_video) }}" type="video/mp4">
+                                Your browser does not support the video tag.
+                            </video>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}<!-- /part D: knot tying -->
+
+            </div><!-- /collapsible-body -->
+        </div><!-- /suture-master-card -->
+
+        {% endfor %}
+        {% endif %}
+
+        <!-- ════════════════════════════════════════════
+             KNOT ANALYSIS  (after all sutures)
+        ════════════════════════════════════════════ -->
+        {% if knot_image %}
+        <div class="results-card">
+            <div class="results-card-header collapsible-trigger" onclick="toggleSection('knot-section')">
+                <div class="card-header-left">
+                    <h2>🔗 Knot Analysis</h2>
+                    <span class="collapse-hint" id="hint-knot-section">Bird's-eye · last 5 s · Click to collapse</span>
+                </div>
+                <span class="collapse-arrow" id="arrow-knot-section">▼</span>
+            </div>
+            <div class="collapsible-body open" id="knot-section">
+                <div class="results-content">
+                    <p class="section-description">
+                        Knot detection and inter-knot distance measurement from the bird's eye video.
+                        Red dots mark each knot; lines show pixel distances between consecutive knots.
+                    </p>
+
+                    <div class="knot-layout">
+
+                        <!-- image -->
+                        <div class="knot-image-container"
+                             onclick="openImageModal(
+                                 '{{ url_for('serve_knot_image', folder_name=folder_name, filename=knot_image) }}',
+                                 'Knot Detection Analysis')">
+                            <img src="{{ url_for('serve_knot_image', folder_name=folder_name, filename=knot_image) }}"
+                                 alt="Knot Analysis" class="knot-image">
+                            <p class="knot-hint">Click to enlarge</p>
+                        </div>
+
+                        <!-- data panel -->
+                        {% if knot_details and knot_details.num_knots %}
+                        <div class="knot-data-panel">
+                            <div class="knot-stat-block">
+                                <span class="knot-stat-number">{{ knot_details.num_knots }}</span>
+                                <span class="knot-stat-label">Knots Detected</span>
+                            </div>
+
+                            {% if knot_details.positions|length > 0 %}
+                            <div class="knot-table-section">
+                                <h4 class="knot-table-title">📍 Knot Positions</h4>
+                                <table class="knot-table">
+                                    <thead><tr><th>Knot</th><th>X</th><th>Y</th></tr></thead>
+                                    <tbody>
+                                        {% for pos in knot_details.positions %}
+                                        <tr>
+                                            <td><span class="knot-dot">●</span> {{ pos.label }}</td>
+                                            <td>{{ pos.x }} px</td>
+                                            <td>{{ pos.y }} px</td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                            {% endif %}
+
+                            {% if knot_details.distances|length > 0 %}
+                            <div class="knot-table-section">
+                                <h4 class="knot-table-title">📏 Inter-Knot Distances</h4>
+                                <table class="knot-table">
+                                    <thead><tr><th>From</th><th>To</th><th>Distance</th></tr></thead>
+                                    <tbody>
+                                        {% for d in knot_details.distances %}
+                                        <tr>
+                                            <td>K{{ d.from }}</td>
+                                            <td>K{{ d.to }}</td>
+                                            <td><strong>{{ d.dist }} px</strong></td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                            {% endif %}
+                        </div>
+                        {% endif %}
+
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- ════════════════════════════════════════════
+             ENTRY / EXIT SUMMARY  (all sutures)
+        ════════════════════════════════════════════ -->
+        {% if entry_exit_summary and entry_exit_summary.rows|length > 0 %}
+        <div class="results-card">
+            <div class="results-card-header collapsible-trigger" onclick="toggleSection('ee-summary')">
+                <div class="card-header-left">
+                    <h2>📍 Entry &amp; Exit Points — All Sutures</h2>
+                    <span class="collapse-hint" id="hint-ee-summary">Click to collapse</span>
+                </div>
+                <span class="collapse-arrow" id="arrow-ee-summary">▼</span>
+            </div>
+
+            <div class="collapsible-body open" id="ee-summary">
+                <div class="results-content">
+
+                    <!-- ── Image gallery ── -->
+                    <p class="section-description">
+                        Last frame of each suture with 🔴 <strong>A{N}</strong> = entry point
+                        and 🔵 <strong>B{N}</strong> = exit point.
+                    </p>
+
+                    <div style="display:flex; flex-wrap:wrap; gap:16px; margin-bottom:28px;">
+                        {% for row in entry_exit_summary.rows %}
+                        <div style="flex:1 1 200px; max-width:260px; text-align:center;">
+                            <p style="font-weight:600; margin:0 0 6px 0;">Suture {{ row.suture_num }}</p>
+                            {% if row.image %}
+                                <div class="analysis-image-container"
+                                     style="cursor:pointer;"
+                                     onclick="openImageModal(
+                                         '{{ url_for('serve_entry_exit_image', folder_name=folder_name, filename=row.image) }}',
+                                         'Suture {{ row.suture_num }} – A{{ row.suture_num }} &amp; B{{ row.suture_num }}')">
+                                    <img src="{{ url_for('serve_entry_exit_image', folder_name=folder_name, filename=row.image) }}"
+                                         alt="Entry/Exit Suture {{ row.suture_num }}"
+                                         style="width:100%; border-radius:6px; border:1px solid #333;">
+                                </div>
+                                <p style="font-size:0.75rem; color:#888; margin:4px 0 0 0;">Click to enlarge</p>
+                            {% else %}
+                                <div style="background:#1e1e1e; border:1px dashed #444; border-radius:6px;
+                                            padding:40px 10px; color:#666; font-size:0.85rem;">
+                                    ❌ Not Detected
+                                </div>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                    </div>
+
+                    <!-- ── Coordinates table ── -->
+                    <h4 style="margin:0 0 10px 0;">📌 Pixel Coordinates</h4>
+                    <div style="overflow-x:auto; margin-bottom:28px;">
+                        <table class="knot-table" style="min-width:480px;">
+                            <thead>
+                                <tr>
+                                    <th>Suture</th>
+                                    <th>🔴 Entry Point (A)</th>
+                                    <th>🔵 Exit Point (B)</th>
+                                    <th>Entry Angle</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for row in entry_exit_summary.rows %}
+                                <tr>
+                                    <td><strong>Suture {{ row.suture_num }}</strong></td>
+                                    <td>
+                                        {% if row.entry_point %}
+                                            <span style="color:#ff4d4d; font-weight:600;">
+                                                A{{ row.suture_num }}
+                                            </span>
+                                            &nbsp;({{ row.entry_point[0] }},&nbsp;{{ row.entry_point[1] }})
+                                        {% else %}
+                                            <span style="color:#666;">— Not detected</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if row.exit_point %}
+                                            <span style="color:#4d9eff; font-weight:600;">
+                                                B{{ row.suture_num }}
+                                            </span>
+                                            &nbsp;({{ row.exit_point[0] }},&nbsp;{{ row.exit_point[1] }})
+                                        {% else %}
+                                            <span style="color:#666;">— Not detected</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if row.entry_angle %}
+                                            {{ row.entry_angle }}°
+                                        {% else %}
+                                            <span style="color:#666;">—</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- ── Distance tables side by side ── -->
+                    <div style="display:flex; flex-wrap:wrap; gap:24px;">
+
+                        <!-- Entry point distances -->
+                        <div style="flex:1 1 260px;">
+                            <h4 style="margin:0 0 10px 0;">📏 Entry Point Distances (A → A)</h4>
+                            {% if entry_exit_summary.entry_distances|length > 0 %}
+                            <table class="knot-table">
+                                <thead>
+                                    <tr><th>From</th><th>To</th><th>Distance</th></tr>
+                                </thead>
+                                <tbody>
+                                    {% for d in entry_exit_summary.entry_distances %}
+                                    <tr>
+                                        <td><span style="color:#ff4d4d; font-weight:600;">{{ d.from }}</span></td>
+                                        <td><span style="color:#ff4d4d; font-weight:600;">{{ d.to }}</span></td>
+                                        <td>
+                                            {% if d.dist is not none %}
+                                                <strong>{{ d.dist }} px</strong>
+                                            {% else %}
+                                                <span style="color:#666;">— N/A</span>
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                            {% else %}
+                                <p style="color:#666; font-size:0.85rem;">Not enough detected points to compute distances.</p>
+                            {% endif %}
+                        </div>
+
+                        <!-- Exit point distances -->
+                        <div style="flex:1 1 260px;">
+                            <h4 style="margin:0 0 10px 0;">📏 Exit Point Distances (B → B)</h4>
+                            {% if entry_exit_summary.exit_distances|length > 0 %}
+                            <table class="knot-table">
+                                <thead>
+                                    <tr><th>From</th><th>To</th><th>Distance</th></tr>
+                                </thead>
+                                <tbody>
+                                    {% for d in entry_exit_summary.exit_distances %}
+                                    <tr>
+                                        <td><span style="color:#4d9eff; font-weight:600;">{{ d.from }}</span></td>
+                                        <td><span style="color:#4d9eff; font-weight:600;">{{ d.to }}</span></td>
+                                        <td>
+                                            {% if d.dist is not none %}
+                                                <strong>{{ d.dist }} px</strong>
+                                            {% else %}
+                                                <span style="color:#666;">— N/A</span>
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                            {% else %}
+                                <p style="color:#666; font-size:0.85rem;">Not enough detected points to compute distances.</p>
+                            {% endif %}
+                        </div>
+
+                    </div><!-- /distance tables -->
+
+                </div>
+            </div>
+        </div>
+        {% endif %}<!-- /entry_exit_summary -->
+
+        <!-- ════════════════════════════════════════════
+             DOWNLOAD FOOTER
+        ════════════════════════════════════════════ -->
+        {% if video_file %}
+        <div class="download-all">
+            <p class="download-label">Original video: <strong>{{ video_file }}</strong></p>
+            <a href="{{ url_for('download_results', folder_name=folder_name) }}" class="btn btn-primary btn-large">
+                ⬇ Download Complete Results (Video + TXT + Images)
+            </a>
+        </div>
+        {% endif %}
+
+    </div><!-- /results-detail -->
+</div><!-- /container -->
+
+<!-- Image Modal -->
+<div id="imageModal" class="image-modal" onclick="closeImageModal()">
+    <span class="modal-close" onclick="closeImageModal()">&times;</span>
+    <img class="modal-content" id="modalImage" alt="">
+    <div id="modalCaption"></div>
+</div>
+
+<script>
+    function toggleSection(id) {
+        var body  = document.getElementById(id);
+        var arrow = document.getElementById('arrow-' + id);
+        var hint  = document.getElementById('hint-'  + id);
+        if (!body) return;
+        var isOpen = body.classList.contains('open');
+        if (isOpen) {
+            body.style.display = 'none';
+            body.classList.remove('open');
+            if (arrow) arrow.textContent = '▶';
+            if (hint)  hint.textContent  = hint.textContent.replace('Click to collapse', 'Click to expand');
+        } else {
+            body.style.display = '';
+            body.classList.add('open');
+            if (arrow) arrow.textContent = '▼';
+            if (hint)  hint.textContent  = hint.textContent.replace('Click to expand', 'Click to collapse');
+        }
+    }
+
+    function openImageModal(src, caption) {
+        document.getElementById('modalImage').src = src;
+        document.getElementById('modalImage').alt = caption;
+        document.getElementById('modalCaption').textContent = caption;
+        document.getElementById('imageModal').style.display = 'block';
+    }
+    function closeImageModal() {
+        document.getElementById('imageModal').style.display = 'none';
+    }
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') closeImageModal();
+    });
+</script>
+</body>
+</html>

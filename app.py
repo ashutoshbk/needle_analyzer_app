@@ -90,7 +90,7 @@ ALLOWED_EXTENSIONS = {'mp4', 'avi', 'mov', 'mkv'}
 
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['RESULTS_FOLDER'] = RESULTS_FOLDER
-app.config['MAX_CONTENT_LENGTH'] = 2 * 1024 * 1024 * 1024  # 2GB max file size
+app.config['MAX_CONTENT_LENGTH'] = 5 * 1024 * 1024 * 1024  # 2GB max file size
 
 # Create necessary folders
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
